@@ -1,0 +1,148 @@
+---
+title: "nflPlayDist"
+output: html_document
+date: "2023-07-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r imports}
+library(nflfastR)
+library(DBI)
+library(RMySQL)
+library(dplyr)
+library(jsonlite)
+library(ggrepel)
+library(ggplot2)
+source("functions/nflDbConnect.R")
+```
+
+Connect to local DB if nflfastR data is being saved locally
+
+```{r local db connect}
+conn <- nflDbConnect()
+```
+
+pull desired data from db
+
+```{r data retrieval}
+query = 'SELECT * FROM pbp WHERE season = 2022'
+pbp <- DBI::dbGetQuery(conn, query)
+dbDisconnect(conn)
+
+# load roster data to assign position to pbp, depth_chart_position keeps FBs out of RB label
+roster <- rbind(nflfastR::fast_scraper_roster(2021), nflfastR::fast_scraper_roster(2022)) %>%
+            select('gsis_id', 'depth_chart_position')
+
+```
+
+data exploration
+
+```{r data filtering}
+### columns of interest
+#### possible cols of interest >>  'play_type_nfl'
+cols <- c('game_id', 'play_id', 'home_team', 'away_team', 'posteam', 'posteam_type', 'defteam', 'play_type',
+          'passer_player_id', 'receiver_player_id', 'rusher_player_id','pass', 'rush', 'yards_gained',
+          'receiving_yards','rushing_yards', 'first_down',  'first_down_rush', 'first_down_pass',
+          'rush_attempt', 'rushing_yards', 'pass_attempt', 'complete_pass', 'sack', 'pass_touchdown',
+          'rush_touchdown', 'two_point_attempt')
+
+#creating lookup for player id > pos
+pos <- roster$depth_chart_position
+names(pos) <- roster$gsis_id
+
+# filtering the pbp to only pass and rush attempts, no 2pt conv AND adding the pos for passer, rusher, receiver
+pbp.filtered <- pbp %>%
+    select(cols) %>%
+    filter(
+        ((play_type == "pass" | play_type == "run") & two_point_attempt == 0)
+    ) %>%
+#    rowwise() %>%
+    mutate(
+    'passer_pos' = pos[passer_player_id],
+    'rusher_pos' = pos[rusher_player_id],
+    'receiver_pos' = pos[receiver_player_id]
+    )
+
+
+```
+
+
+
+```{r}
+
+pbp.filtered %>% group_by(play_type) %>% summarise(first= sum(first_down), total=n(), per=sum(first_down)/n())
+```
+
+
+
+rb rushing plays
+
+```{r}
+# filter to only plays where the rusher was RB
+rbRushing <- pbp.filtered %>%
+                filter(rusher_pos == "RB")
+
+```
+
+```{r}
+print(rbRushing %>% group_by(rushing_yards) %>% summarise(n()))
+barplot(table(rbRushing$rushing_yards))
+
+```
+
+
+
+qb rushing plays
+
+```{r}
+qbRushing <- pbp.filtered %>%
+                filter(rusher_pos == "QB")
+
+```
+
+wr receiving plays
+
+```{r}
+wrReceiving <- pbp.filtered %>%
+                filter(receiver_pos == "WR")
+
+```
+
+te receiving plays
+
+```{r}
+teReceiving <- pbp.filtered %>%
+                filter(receiver_pos == "TE")
+```
+
+rb receiving plays
+
+```{r}
+rbReceiving <- pbp.filtered %>%
+                filter(receiver_pos == "RB")
+```
+
+
+
+```{r}
+
+allReceiving <- pbp.filtered %>%
+                    filter((receiver_pos == "RB" | receiver_pos == "WR" | receiver_pos == "TE"))
+
+allReceiving %>% ggplot(aes(x=receiving_yards, fill=receiver_pos)) + geom_density(alpha=.3)
+
+allReceiving %>% ggplot(aes(x=receiver_pos, y=receiving_yards)) + geom_boxplot()
+
+```
+
+
+
+```{r}
+
+```
+
+
